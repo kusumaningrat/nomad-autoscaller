@@ -1,0 +1,74 @@
+job "{{ job_name }}" { 
+  datacenters = ["{{ datacenter_name }}"]
+  type = "service"
+  namespace = "{{ namespace }}"
+
+  update {
+    max_parallel     = 1
+    health_check     = "task_states"
+    min_healthy_time = "30s"
+  }
+
+  group "{{ group_name }}" {
+    count = 1
+
+    network {
+      port "http" {
+        static       = {{ exposed_port }}
+        to           = {{ container_port }}
+        host_network = "private"
+      }
+    }
+
+    service {
+      name = "{{ group_name }}"
+      tags = ["apps", "logs.promtail"]
+      port = "http"
+      check {
+        name     = "api-health"
+        type     = "http"
+        path     = "{{ health_check_path }}"
+        interval = "30s"
+        timeout  = "10s"
+      }
+    }
+
+    constraint {
+      attribute = "${attr.unique.hostname}"
+      value     = "{{ new_target_worker }}"
+    }
+
+    task "{{ group_name }}" {
+      driver = "docker"
+
+      config {
+        image = "{{ registry_url }}"
+        ports = ["http"]
+        dns_servers = {{ dns_servers }}
+        auth {
+          username = "{{ registry_user }}"
+          password = "{{ registry_pass }}"
+          #server_address = "harbor-registry.service.consul:8085"
+          server_address = "docker.io"
+        }
+      }
+
+      vault {
+        role = "{{ vault_role }}"
+      }
+
+      template {
+        destination = "secrets/env"
+        env         = true
+        data = <<EOF
+{{ vault_keys }}
+EOF
+      }
+
+      resources {
+        cpu    = {{ cpu }}
+        memory = {{ memory }}
+      }
+    }
+  }
+}
